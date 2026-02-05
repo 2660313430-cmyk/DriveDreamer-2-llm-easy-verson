@@ -72,6 +72,18 @@ python videocreate.py
 
 ---
 
+## 🖼️ 生成效果展示 (Gallery)
+
+以下是系统生成的驾驶场景示例：
+
+<img width="100%" alt="sample1" src="https://github.com/user-attachments/assets/8906fdd4-01b8-48e8-a926-79fbf563460d" />
+
+---
+
+<img width="100%" alt="sample2" src="https://github.com/user-attachments/assets/0b4f9d78-558d-4b6f-b6d5-fe45546acd45" />
+
+---
+
 ## 🙏 致谢 (Acknowledgements)
 
 本项目对以下论文及开源工作表示衷心的感谢与致敬：
@@ -84,30 +96,4 @@ python videocreate.py
 
 ## ⚖️ 开源协议 (License)
 
-本项目采用 [MIT License](https://www.google.com/search?q=LICENSE) 开源协议。
-
-```<img width="1233" height="595" alt="sample1" src="https://github.com/user-attachments/assets/8906fdd4-01b8-48e8-a926-79fbf563460d" />
-
-
----<img width="1165" height="565" alt="sample2" src="https://github.com/user-attachments/assets/0b4f9d78-558d-4b6f-b6d5-fe45546acd45" />
-
-
-### 💡 如何把这个文件放到 GitHub？
-
-1. **新建文件**：在你的本地 Windows 文件夹 `UniMVM-AutoPilot` 中，右键新建一个文本文档。
-2. **命名**：重命名为 **`README.md`**（注意删掉后缀的 `.txt`）。
-3. **粘贴**：将上面的内容完整复制进去。
-4. **提交推送**：
-    
-   在文件夹内运行：
-   ```bash
-   git add README.md
-   git commit -m "docs: add detailed README and project structure"
-   git push origin main
-
-```
-
-### 🌟 额外小建议
-
-* **加入 Demo 动图**：如果你能把你生成的 10 秒视频转成 GIF，放在 README 的开头，会让你的项目瞬间变得非常有吸引力。
-* **分阶段展示**：可以在 README 里展示一下“轨迹图 -> 高精地图 -> 最终画面”的对比图。
+本项目采用 [MIT License](https://opensource.org/licenses/MIT) 开源协议。
