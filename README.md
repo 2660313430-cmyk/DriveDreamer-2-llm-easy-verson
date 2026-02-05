@@ -67,6 +67,7 @@ export LLM_API_KEY="你的_DeepSeek_API_Key"
 ```bash
 python videocreate.py
 
+
 ```
 
 ---
@@ -85,9 +86,11 @@ python videocreate.py
 
 本项目采用 [MIT License](https://www.google.com/search?q=LICENSE) 开源协议。
 
-```
+```<img width="1233" height="595" alt="sample1" src="https://github.com/user-attachments/assets/8906fdd4-01b8-48e8-a926-79fbf563460d" />
 
----
+
+---<img width="1165" height="565" alt="sample2" src="https://github.com/user-attachments/assets/0b4f9d78-558d-4b6f-b6d5-fe45546acd45" />
+
 
 ### 💡 如何把这个文件放到 GitHub？
 
