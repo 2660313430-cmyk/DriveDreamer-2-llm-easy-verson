@@ -10,15 +10,19 @@ from diffusers import StableDiffusionControlNetPipeline, ControlNetModel, UniPCM
 from openai import OpenAI
 
 # ================= 🔧 配置区域 =================
-import os
-# 优先读取环境变量，读不到就用空字符串 (让用户自己填)
-API_KEY = os.getenv("LLM_API_KEY", "") 
-# 或者直接留空，写个注释提醒用户填
-# API_KEY = "填入你的DeepSeek_Key"
-BASE_URL = "https://api.deepseek.com"
 
+# ⚠️ 安全警告：这是你的私钥，请勿上传此文件到 GitHub！
+# 如果上传代码，请务必将此处改回 os.getenv("LLM_API_KEY")
+API_KEY = "在这里填入你的DeepSeek_Key" 
+
+BASE_URL = "https://api.deepseek.com"
 MODEL_PATH = "/root/autodl-tmp/models/unimvm_video_model"
 BASE_MODEL = "runwayml/stable-diffusion-v1-5"
+
+# --- 🎞️ 视频流畅度核心参数 ---
+TARGET_FPS = 12        # 目标帧率：12 FPS (人眼流畅标准)
+VIDEO_DURATION = 10    # 视频时长：10秒
+TOTAL_FRAMES = TARGET_FPS * VIDEO_DURATION # 总帧数：120帧
 # ==============================================
 
 pipe = None
@@ -35,59 +39,77 @@ def load_model():
             )
             pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
             pipe.to(device)
-            # 使用更通用的显存优化，避免 xformers 报错
+            # 开启显存优化
             pipe.enable_model_cpu_offload()
             print("✅ 模型加载完毕！")
         except Exception as e:
             print(f"⚠️ 模型加载警告: {e}")
+            print(f"请检查路径是否存在: {MODEL_PATH}")
     return pipe
 
-def get_trajectory_30pts(prompt):
+def get_trajectory_from_llm(prompt):
+    """使用 DeepSeek 获取原始轨迹"""
+    if not API_KEY or "你的" in API_KEY:
+        print("❌ 错误：请先在代码第 16 行填入正确的 API Key！")
+        return np.linspace(0, 0, 30)
+
     client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
     try:
-        print(f"🤖 LLM 正在规划路径...")
+        print(f"🤖 DeepSeek 正在规划路径...")
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=[
-                {"role": "system", "content": "你是一个自动驾驶规划师。请输出未来10秒的30个横向坐标点，逗号分隔。范围-4到4。"},
+                {"role": "system", "content": "你是一个自动驾驶规划师。请输出未来10秒的30个横向坐标点，逗号分隔。范围-4到4（负数为左，正数为右）。仅输出数字。"},
                 {"role": "user", "content": f"指令: {prompt}"},
             ],
             temperature=0.1
         )
         content = response.choices[0].message.content.strip()
+        # 数据清洗
+        content = content.replace('\n', ',').replace(' ', '')
         traj = np.fromstring(content, sep=',')
-        # 补齐到 30 个点
+        
+        # 兜底补全
         if len(traj) < 30:
             traj = np.pad(traj, (0, 30 - len(traj)), 'edge')
         return traj[:30]
     except Exception as e:
-        print(f"LLM 故障: {e}")
+        print(f"❌ LLM 调用失败: {e}")
+        # 失败时返回直线
         return np.linspace(0, 0, 30)
 
-def draw_slow_map(trajectory, frame_idx, total_frames=30):
-    """修复越界问题的绘图函数"""
+def interpolate_trajectory(original_traj, target_length):
+    """
+    🧮 插值算法：将 30 个点平滑扩展到 120 个点
+    """
+    old_indices = np.linspace(0, 10, len(original_traj))
+    new_indices = np.linspace(0, 10, target_length)
+    new_traj = np.interp(new_indices, old_indices, original_traj)
+    return new_traj
+
+def draw_smooth_map(trajectory, frame_idx, window_size=40):
+    """
+    绘图函数 (适配 120 帧的大窗口)
+    """
     plt.figure(figsize=(4, 2.5), dpi=100)
     plt.style.use('dark_background')
     
-    window_size = 10
-    
-    # 【修复重点】：对轨迹进行末端填充，防止切片越界
-    # 这样当 frame_idx 增加时，后面总是有数据可以画
+    # 防止数组越界
     padded_traj = np.pad(trajectory, (0, window_size), 'edge')
     
     start_y = frame_idx
     end_y = frame_idx + window_size
     
-    # 绘制背景车道线
+    # 绘制车道线
     y_bg = np.arange(window_size)
     plt.plot(np.zeros_like(y_bg) - 2.0, y_bg, color='white', linestyle='--', alpha=0.3)
     plt.plot(np.zeros_like(y_bg) + 2.0, y_bg, color='white', linestyle='--', alpha=0.3)
     
-    # 绘制当前窗口内的轨迹
+    # 绘制红色轨迹
     current_traj_segment = padded_traj[start_y:end_y]
     plt.plot(current_traj_segment, np.arange(len(current_traj_segment)), color='red', linewidth=4)
     
-    plt.xlim(-5, 5); plt.ylim(0, 10); plt.axis('off'); plt.tight_layout(pad=0)
+    plt.xlim(-5, 5); plt.ylim(0, window_size); plt.axis('off'); plt.tight_layout(pad=0)
     
     buf = BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
@@ -95,46 +117,66 @@ def draw_slow_map(trajectory, frame_idx, total_frames=30):
     plt.close()
     return Image.open(buf).convert("RGB").resize((448, 256))
 
-def generate_slow_video(user_prompt):
-    traj = get_trajectory_30pts(user_prompt)
+def generate_smooth_video(user_prompt):
     pipeline = load_model()
-    
-    fps = 3 
-    num_frames = 30 
-    frames = []
-    
-    print(f"🎬 开始生成视频...")
-    generator = torch.Generator(device="cuda").manual_seed(42)
+    if pipeline is None:
+        return None, "模型加载失败，请检查路径"
 
-    for i in range(num_frames):
-        print(f"渲染中: {i+1}/{num_frames}")
-        map_img = draw_slow_map(traj, i, num_frames)
+    # 1. 获取 LLM 规划
+    raw_traj = get_trajectory_from_llm(user_prompt)
+    
+    # 2. 插值变平滑 (30 -> 120)
+    smooth_traj = interpolate_trajectory(raw_traj, TOTAL_FRAMES)
+    
+    print(f"🎬 开始渲染... (FPS: {TARGET_FPS} | 总帧数: {TOTAL_FRAMES})")
+    
+    frames = []
+    generator = torch.Generator(device="cuda").manual_seed(42)
+    # 动态调整视野：总是看未来约 3 秒的路
+    window_size = int(TOTAL_FRAMES / 3) 
+
+    for i in range(TOTAL_FRAMES):
+        if i % 10 == 0:
+            print(f"🚀 进度: {i}/{TOTAL_FRAMES} 帧")
+            
+        map_img = draw_smooth_map(smooth_traj, i, window_size=window_size)
         
-        # 每一帧的生成
+        # 3. 生成每一帧
         frame = pipeline(
-            prompt=f"first person view driving video, {user_prompt}, realistic highway, 4k",
-            negative_prompt="blurry, distorted, text",
+            prompt=f"first person view driving video, {user_prompt}, realistic highway, 4k, motion blur",
+            negative_prompt="blurry, distorted, text, low quality, cartoon",
             image=map_img,
-            num_inference_steps=20,
+            num_inference_steps=15, # 步数调低至15以加快速度
             generator=generator
         ).images[0]
         
         frames.append(np.array(frame))
 
-    video_path = "stable_driving_3fps.mp4"
-    imageio.mimsave(video_path, frames, fps=fps)
-    return draw_slow_map(traj, 0, num_frames), video_path
+    video_path = "smooth_driving_12fps.mp4"
+    imageio.mimsave(video_path, frames, fps=TARGET_FPS)
+    print(f"🎉 视频生成完成: {video_path}")
+    
+    return draw_smooth_map(smooth_traj, 0, window_size), video_path
 
-# ================= 🎨 UI =================
-with gr.Blocks() as demo:
-    gr.Markdown("# 🚗 UniMVM 自动驾驶视频生成 (修复版)")
+# ================= 🎨 界面启动 =================
+with gr.Blocks(title="UniMVM Pro (Port 6008)") as demo:
+    gr.Markdown(f"# 🚗 UniMVM 自动驾驶视频生成 (Pro版)")
+    gr.Markdown(f"**状态**: 端口 6008 | {TARGET_FPS} FPS | 10秒时长")
+    
     with gr.Row():
-        txt_input = gr.Textbox(label="输入指令", value="向左平稳变道")
-        btn_submit = gr.Button("🚀 渲染视频", variant="primary")
+        txt_input = gr.Textbox(label="输入指令", value="向左平稳变道", placeholder="例如：向右急转弯")
+        btn_submit = gr.Button("🎬 开始渲染", variant="primary")
+        
     with gr.Row():
-        img_pre = gr.Image(label="初始轨迹预览")
-        vid_out = gr.Video(label="生成结果")
-    btn_submit.click(fn=generate_slow_video, inputs=txt_input, outputs=[img_pre, vid_out])
+        img_pre = gr.Image(label="轨迹预览", type="pil")
+        vid_out = gr.Video(label="最终视频")
+        
+    btn_submit.click(fn=generate_smooth_video, inputs=txt_input, outputs=[img_pre, vid_out])
 
 if __name__ == "__main__":
-    demo.queue().launch(server_name="0.0.0.0", server_port=6006)
+    # 【关键修改】这里改成了 6008 端口，避开冲突
+    try:
+        demo.queue().launch(server_name="0.0.0.0", server_port=6008)
+    except Exception as e:
+        print(f"❌ 启动失败: {e}")
+        print("💡 建议：尝试修改代码最后一行，换成 server_port=6009 试试")
